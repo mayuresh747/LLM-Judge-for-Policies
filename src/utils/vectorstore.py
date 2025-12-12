@@ -9,7 +9,7 @@ def create_vectorstore(documents: List[Document]) -> FAISS:
     # Use GitHub Models OpenAI token for embeddings
     api_key = os.getenv("GITHUB_TOKEN_OPENAI")
     if not api_key:
-        raise ValueError("GITHUB_TOKEN_OPENAI environment variable not set")
+        raise ValueError("GITHUB_TOKEN_OPENAI environment variable is not set")
 
     embeddings = OpenAIEmbeddings(
         model="text-embedding-3-small",
