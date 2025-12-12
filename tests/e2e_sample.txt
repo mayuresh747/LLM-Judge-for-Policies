@@ -1,0 +1,5 @@
+This is a dummy policy document for end-to-end testing.
+It contains conflicts about policy A and policy B.
+Policy A states that all users must be verified.
+Policy B states that guest users are allowed without verification.
+End of document.
