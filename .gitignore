@@ -4,3 +4,17 @@ __pycache__/
 .streamlit/
 *.log
 venv/
+venv_new/
+.DS_Store
+
+# Temp files
+*.patch
+reproduce_issue.py
+jules_tasks.txt
+download DR Files.py
+import SPU files.py
+
+# Test files (optional - can remove if you want to keep)
+tests/debug_perf.py
+tests/e2e_run.py
+tests/list_models.py
