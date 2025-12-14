@@ -1,0 +1,32 @@
+{
+    "default": {
+        "enable_retry": false,
+        "max_attempts": 1,
+        "wait_min": 0,
+        "wait_max": 0
+    },
+    "Groq": {
+        "enable_retry": true,
+        "max_attempts": 5,
+        "wait_min": 4,
+        "wait_max": 60
+    },
+    "GitHub": {
+        "enable_retry": true,
+        "max_attempts": 5,
+        "wait_min": 4,
+        "wait_max": 60
+    },
+    "Gemini": {
+        "enable_retry": true,
+        "max_attempts": 3,
+        "wait_min": 2,
+        "wait_max": 30
+    },
+    "Ollama": {
+        "enable_retry": false,
+        "max_attempts": 1,
+        "wait_min": 0,
+        "wait_max": 0
+    }
+}
