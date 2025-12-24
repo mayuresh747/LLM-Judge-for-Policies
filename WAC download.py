@@ -25,14 +25,12 @@ def get_soup(url):
 
 def clean_filename(text):
     """Sanitize string to be valid filename."""
-    # Replace invalid characters with underscore
     safe_text = re.sub(r'[\\/*?:"<>|]', "", text)
-    # Replace multiple spaces/newlines with single underscore
     safe_text = re.sub(r'\s+', '_', safe_text)
     return safe_text.strip('_')
 
 def download_file(url, folder, filename):
-    """Helper to download a file."""
+    """Helper to download a file with Content-Type checking."""
     filepath = os.path.join(folder, filename)
     if os.path.exists(filepath):
         print(f"  - File already exists: {filename}")
@@ -40,8 +38,16 @@ def download_file(url, folder, filename):
 
     try:
         print(f"  - Downloading {filename}...")
-        response = requests.get(url, stream=True, timeout=30)
+        # Stream the request to check headers before downloading body
+        response = requests.get(url, stream=True, timeout=60)
         response.raise_for_status()
+
+        # VALIDATION: Check if the server is sending us a PDF or HTML
+        content_type = response.headers.get('Content-Type', '').lower()
+        if 'html' in content_type:
+            print(f"    ERROR: Server returned HTML instead of PDF. URL might be wrong: {url}")
+            return
+        
         with open(filepath, 'wb') as f:
             for chunk in response.iter_content(chunk_size=8192):
                 f.write(chunk)
@@ -52,28 +58,25 @@ def download_file(url, folder, filename):
 def main():
     print("Starting WAC Scraper...")
     
-    # 1. Get List of Titles from the Main Page
+    # 1. Get List of Titles
     main_soup = get_soup(BASE_URL)
     if not main_soup:
         return
 
     title_links = []
-    # Identify Title links
     for a in main_soup.find_all('a', href=True):
         if 'cite=' in a['href'] and 'Title' in a.get_text():
             full_link = urljoin(BASE_URL, a['href'])
             title_text = a.get_text().strip()
-            # Create a simple folder name for the Title (e.g., "Title_1")
             folder_name = clean_filename(title_text.split('|')[0] if '|' in title_text else title_text)
             title_links.append((folder_name, full_link))
 
     print(f"Found {len(title_links)} Titles.")
 
-    # 2. Iterate through each Title
+    # 2. Iterate Titles
     for title_folder_name, title_url in title_links:
         print(f"\nProcessing {title_folder_name}...")
         
-        # Create subfolder for Title
         title_dir = os.path.join(OUTPUT_DIR, title_folder_name)
         if not os.path.exists(title_dir):
             os.makedirs(title_dir)
@@ -82,80 +85,73 @@ def main():
         if not title_soup:
             continue
 
-        # 3. Get List of Chapters from the Title Page
+        # 3. Get Chapters
         chapter_data = []
-        
-        # Iterate over all rows (tr) to find chapters and their descriptions
-        # WAC lists are often in tables; this grabs the text from the whole row
+        # Try table row logic first (most reliable for descriptions)
         for tr in title_soup.find_all('tr'):
             link_tag = tr.find('a', href=True)
             if link_tag and 'cite=' in link_tag['href']:
                 chapter_num = link_tag.get_text().strip()
-                
-                # Check if it looks like a chapter (e.g., "1-06")
                 if chapter_num and chapter_num[0].isdigit() and '-' in chapter_num:
                     full_chapter_url = urljoin(BASE_URL, link_tag['href'])
-                    
-                    # Extract the full text of the row to get the description
-                    # Example row text: "1-06 Public records."
                     full_row_text = tr.get_text(" ", strip=True)
-                    
-                    # If we found text, use it; otherwise fallback to just number
                     chapter_name = full_row_text if full_row_text else chapter_num
-                    
                     chapter_data.append((chapter_name, full_chapter_url))
-
-        # Fallback: If table logic failed (site layout differences), try standard links
+        
+        # Fallback if table logic fails
         if not chapter_data:
              for a in title_soup.find_all('a', href=True):
                 if 'cite=' in a['href']:
                     txt = a.get_text().strip()
                     if txt and txt[0].isdigit() and '-' in txt:
-                        # Try to grab sibling text if not in a table
                         desc = a.next_sibling
                         full_name = txt + " " + (desc.strip() if desc else "")
                         chapter_data.append((full_name, urljoin(BASE_URL, a['href'])))
 
         print(f"  Found {len(chapter_data)} Chapters in {title_folder_name}.")
 
-        # 4. Iterate through each Chapter
+        # 4. Iterate Chapters
         for raw_chapter_name, chapter_url in chapter_data:
-            # Create clean filename: "WAC_1-06_Public_records.pdf"
             clean_name = clean_filename(raw_chapter_name)
-            # Ensure it's not too long (filesystem limits)
-            if len(clean_name) > 100:
-                clean_name = clean_name[:100]
-            
+            if len(clean_name) > 100: clean_name = clean_name[:100]
             filename = f"WAC_{clean_name}.pdf"
             
-            # Check if file exists
             if os.path.exists(os.path.join(title_dir, filename)):
-                print(f"  - Skipping {filename} (already exists)")
+                print(f"  - Skipping {filename}")
                 continue
 
             chapter_soup = get_soup(chapter_url)
             if not chapter_soup:
                 continue
 
-            # 5. Find the "Complete Chapter" PDF link
+            # 5. FIND THE PDF LINK (FIXED LOGIC)
             pdf_link = None
-            # Search for the specific "Complete Chapter" PDF icon/link
-            for a in chapter_soup.find_all('a', href=True):
-                # Criteria: has 'pdf' in text or href, and 'full=true' indicating complete chapter
-                if 'full=true' in a['href']:
-                    pdf_link = urljoin(BASE_URL, a['href'])
-                    break
             
-            # Fallback search strategies
+            # Strategy A: Look for explicit "Complete Chapter" header/container
+            # The site often has "Complete Chapter" text followed by a PDF link
+            header = chapter_soup.find(string=re.compile("Complete Chapter", re.IGNORECASE))
+            if header:
+                # Look in the parent container for a link with "PDF" text or .pdf extension
+                parent = header.find_parent()
+                if parent:
+                    # Try to find a link with text "PDF"
+                    target_link = parent.find_next('a', string=re.compile("PDF", re.IGNORECASE))
+                    if not target_link:
+                         # Or any link ending in .pdf nearby
+                         target_link = parent.find_next('a', href=re.compile(r'\.pdf$', re.IGNORECASE))
+                    
+                    if target_link:
+                        pdf_link = urljoin(BASE_URL, target_link['href'])
+
+            # Strategy B: If A failed, look globally for a link ending in .pdf
+            # (ignoring Section PDFs which usually don't appear until further down)
             if not pdf_link:
-                # Look for "Complete Chapter" text, then find the PDF link nearby
-                header_node = chapter_soup.find(string=re.compile("Complete Chapter", re.IGNORECASE))
-                if header_node:
-                    parent_container = header_node.find_parent()
-                    if parent_container:
-                        possible_link = parent_container.find_next('a', href=re.compile(r'\.pdf', re.IGNORECASE))
-                        if possible_link:
-                            pdf_link = urljoin(BASE_URL, possible_link['href'])
+                for a in chapter_soup.find_all('a', href=True):
+                    # Check for direct PDF file extension
+                    if a['href'].lower().endswith('.pdf'):
+                        pdf_link = urljoin(BASE_URL, a['href'])
+                        # Usually the first PDF on the page is the complete chapter
+                        break
 
             if pdf_link:
                 download_file(pdf_link, title_dir, filename)
